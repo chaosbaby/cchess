@@ -1,112 +1,77 @@
 # -*- coding: utf-8 -*-
 """
-Copyright (C) 2024  walker li <walker8088@gmail.com>
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+Main entry point for CChess CLI.
+Supports conversion between various formats including UIM.
 """
 
-import sys
 import argparse
-import pathlib
+import sys
+import os
+from pathlib import Path
+from .converter import walk_files, convert_file
+from .uim import init_db
 
-from .game import Game
+def parse_args(args=None):
+    parser = argparse.ArgumentParser(prog="cchess")
+    subparsers = parser.add_subparsers(dest="command", help="Sub-commands")
 
-
-def print_game(game):
-    """将棋局信息、初始盘面和走子文本打印到标准输出。"""
-
-    print("\n=====================================")
-    for key, v in game.info.items():
-        if v:
-            print(f"{key} : {v}")
-
-    game.print_init_board()
-    print("-------------------------------------")
-    if game.annote:
-        print(game.annote)
-        print("-------------------------------------")
-
-    game.print_text_moves(steps_per_line=5, show_annote=True)
-
-
-def convert_format(input_file, output_file):
-    """读取一种格式的棋谱文件并转换为另一种格式。
-
-    支持的转换:
-        pgn -> xqf, cbf -> xqf
-        xqf -> pgn
-    """
-    in_ext = pathlib.Path(input_file).suffix.lower()
-    out_ext = pathlib.Path(output_file).suffix.lower()
-
-    if in_ext not in (".pgn", ".xqf", ".cbf"):
-        print(f"不支持的输入格式: {in_ext} (支持 pgn, xqf, cbf)")
-        sys.exit(-1)
-
-    if out_ext not in (".xqf", ".pgn"):
-        print(f"不支持的输出格式: {out_ext} (支持 xqf, pgn)")
-        sys.exit(-1)
-
-    if in_ext == out_ext:
-        print(f"输入和输出格式相同: {in_ext}")
-        sys.exit(-1)
-
-    try:
-        game = Game.read_from(input_file)
-    except (OSError, ValueError) as e:
-        print(f"读取文件失败: {e}")
-        sys.exit(-1)
-
-    if out_ext == ".xqf":
-        from .io_xqf import XQFWriter  # pylint: disable=import-outside-toplevel
-
-        writer = XQFWriter(game)
-        writer.save(output_file)
-    elif out_ext == ".pgn":
-        game.save_to_pgn(output_file)
-
-    print(f"转换成功: {input_file} ({in_ext[1:]}) -> {output_file} ({out_ext[1:]})")
-
+    # Convert command
+    conv_parser = subparsers.add_parser("convert", help="Convert chess move formats")
+    conv_parser.add_argument("input", help="Input file or directory")
+    conv_parser.add_argument("--to", required=True, choices=["uim", "pgn", "fen", "txt", "ubb"], 
+                             help="Target format")
+    conv_parser.add_argument("--from-ext", dest="from_ext", choices=["xqf", "pgn", "cbl", "cbf", "ubb", "uim"],
+                             help="Force input format (optional)")
+    conv_parser.add_argument("-o", "--output", help="Output directory or database file")
+    conv_parser.add_argument("-r", "--recursive", action="store_true", help="Recursive scan")
+    conv_parser.add_argument("--level", type=int, default=999, help="Max recursion level")
+    
+    return parser.parse_args(args)
 
 def main():
-    """命令行入口：读取棋谱并打印内容，或进行格式转换。"""
-    parser = argparse.ArgumentParser(prog="python -m cchess")
-    parser.add_argument("-r", "--readfile", help="read pgn,xqf,cbf and cbl file")
-    parser.add_argument("-i", "--input", help="input file for format conversion")
-    parser.add_argument("-o", "--output", help="output file for format conversion")
-    args = parser.parse_args()
-
-    if args.input and args.output:
-        convert_format(args.input, args.output)
-        return
-
-    file_name = args.readfile
-    if file_name:
-        ext = pathlib.Path(file_name).suffix.lower()
-        if ext == ".cbl":
-            lib = Game.read_from_lib(file_name)
-            print(lib["name"])
-            for game in lib["games"]:
-                print_game(game)
+    args = parse_args(sys.argv[1:])
+    
+    if args.command == "convert":
+        input_path = Path(args.input)
+        if not input_path.exists():
+            raise FileNotFoundError(f"Input path not found: {args.input}")
+            
+        target_format = args.to.lower()
+        
+        if args.output:
+            output_path = Path(args.output)
         else:
-            try:
-                game = Game.read_from(file_name)
-            except (OSError, ValueError) as e:
-                print(e)
-                sys.exit(-1)
-            print_game(game)
+            output_path = Path("output")
+            
+        if target_format != "uim" and not output_path.exists():
+            output_path.mkdir(parents=True, exist_ok=True)
 
+        print(f"Scanning files in {input_path}...")
+        files = list(walk_files(input_path, recursive=args.recursive, max_level=args.level))
+        print(f"Found {len(files)} files. Starting conversion...")
+        
+        # 优化: 如果目标是 UIM，维持一个持久连接并在最后 commit
+        uim_conn = None
+        if target_format == "uim":
+            uim_conn = init_db(str(output_path))
+            uim_conn.execute("PRAGMA journal_mode = OFF")
+            uim_conn.execute("PRAGMA synchronous = OFF")
+            uim_conn.execute("BEGIN") # 显式事务
+
+        for f in files:
+            try:
+                print(f"Processing {f.name}...")
+                convert_file(f, target_format, output_path, uim_conn=uim_conn)
+            except Exception as e:
+                print(f"Error converting {f}: {e}")
+        
+        if uim_conn:
+            uim_conn.commit()
+            uim_conn.close()
+                
+        print("Done.")
+    else:
+        print("Use 'cchess --help' for usage.")
 
 if __name__ == "__main__":
     main()
