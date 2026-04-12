@@ -112,7 +112,7 @@ def save_node(conn, board: ChessBoard) -> int:
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO nodes (zhash, piece_mask, fen) VALUES (?, ?, ?)",
                    (zhash, piece_mask, fen))
-    conn.commit()
+    # conn.commit() # 移除 Commit 以提高批量导入性能
     return zhash
 
 def save_edge(conn, from_hash, to_hash, move_uci, game_id):
@@ -122,7 +122,7 @@ def save_edge(conn, from_hash, to_hash, move_uci, game_id):
     cursor = conn.cursor()
     cursor.execute("INSERT INTO edges (from_hash, to_hash, move_uci, game_id) VALUES (?, ?, ?, ?)",
                    (from_hash, to_hash, move_uci, game_id))
-    conn.commit()
+    # conn.commit()
 
 def save_game(conn, red, black, date, result, event="") -> int:
     """
@@ -131,7 +131,7 @@ def save_game(conn, red, black, date, result, event="") -> int:
     cursor = conn.cursor()
     cursor.execute("INSERT INTO games (red, black, date, result, event) VALUES (?, ?, ?, ?, ?)",
                    (red, black, date, result, event))
-    conn.commit()
+    # conn.commit()
     return cursor.lastrowid
 
 def search_by_piecemask(conn, target_counts: Dict[str, int]) -> List[str]:
