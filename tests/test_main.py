@@ -33,7 +33,7 @@ class TestReaderXQF:
         pass
 
     def test_main_entry(self):
-        testargs = ["prog", "-r", ".\\data\\test.cbf"]
+        testargs = ["prog", "-r", os.path.join("data", "test.cbf")]
         with patch.object(sys, "argv", testargs):
             rt_main.main()
 
@@ -41,7 +41,7 @@ class TestReaderXQF:
         out_file = Path("data", "test_convert_out.xqf")
         if out_file.exists():
             os.remove(out_file)
-        testargs = ["prog", "-i", "data\\test.pgn", "-o", str(out_file)]
+        testargs = ["prog", "-i", os.path.join("data", "test.pgn"), "-o", str(out_file)]
         with patch.object(sys, "argv", testargs):
             rt_main.main()
         assert out_file.exists()
@@ -54,7 +54,7 @@ class TestReaderXQF:
         out_file = Path("data", "test_convert_out.pgn")
         if out_file.exists():
             os.remove(out_file)
-        testargs = ["prog", "-i", "data\\test.xqf", "-o", str(out_file)]
+        testargs = ["prog", "-i", os.path.join("data", "test.xqf"), "-o", str(out_file)]
         with patch.object(sys, "argv", testargs):
             rt_main.main()
         assert out_file.exists()
@@ -67,7 +67,7 @@ class TestReaderXQF:
         out_file = Path("data", "test_cbf_convert_out.xqf")
         if out_file.exists():
             os.remove(out_file)
-        testargs = ["prog", "-i", "data\\test.cbf", "-o", str(out_file)]
+        testargs = ["prog", "-i", os.path.join("data", "test.cbf"), "-o", str(out_file)]
         with patch.object(sys, "argv", testargs):
             rt_main.main()
         assert out_file.exists()
@@ -77,7 +77,7 @@ class TestReaderXQF:
         os.remove(out_file)
 
     def test_same_format_error(self):
-        testargs = ["prog", "-i", "data\\test.pgn", "-o", "data\\test_out.pgn"]
+        testargs = ["prog", "-i", os.path.join("data", "test.pgn"), "-o", os.path.join("data", "test_out.pgn")]
         with patch.object(sys, "argv", testargs):
             with pytest.raises(SystemExit) as ctx:
                 rt_main.main()
@@ -85,7 +85,7 @@ class TestReaderXQF:
 
     def test_unsupported_input_format(self):
         out_file = Path("data", "test_out.xqf")
-        testargs = ["prog", "-i", "data\\test.cbl", "-o", str(out_file)]
+        testargs = ["prog", "-i", os.path.join("data", "test.cbl"), "-o", str(out_file)]
         with patch.object(sys, "argv", testargs):
             with pytest.raises(SystemExit) as ctx:
                 rt_main.main()

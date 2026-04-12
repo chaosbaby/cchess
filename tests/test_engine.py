@@ -18,6 +18,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import time
+import sys
+import pytest
 from pathlib import Path
 
 import cchess
@@ -63,15 +65,15 @@ class TestEngineException:
 
     def test_engine_error(self):
         self.engine = UciEngine()
-        ret, _err_msg = self.engine.load("Engine\\pikafish_230408\\pikafishh.exe")
+        ret, _err_msg = self.engine.load(os.path.join("Engine", "pikafish_230408", "pikafishh.exe"))
         assert ret is False
         assert self.engine.engine_status == EngineStatus.ERROR
 
     def test_engine_exception(self):
+        if sys.platform != "win32":
+            pytest.skip("Skip engine test on non-windows platform")
         self.engine = UciEngine()
-        self.engine.load("Engine\\pikafish_230408\\pikafish-vnni512.exe")
-        # print(self.engine.engine_status)
-        # assert self.engine.engine_status == EngineStatus.ERROR
+        self.engine.load(os.path.join("Engine", "pikafish_230408", "pikafish-vnni512.exe"))
 
 
 class TestUcci:
@@ -85,7 +87,11 @@ class TestUcci:
         self.engine = UcciEngine()
         assert self.engine.load("eleeye")[0] is False
 
-        assert self.engine.load("Engine\\eleeye\\eleeye.exe")[0] is True
+        ret, _err_msg = self.engine.load(os.path.join("Engine", "eleeye", "eleeye.exe"))
+        if not ret and sys.platform != "win32":
+            pytest.skip("Skip engine test: engine not found or not executable on this platform")
+        
+        assert ret is True
         assert self.engine.wait_for_ready() is True
         assert self.engine.engine_status == EngineStatus.READY
 
@@ -138,7 +144,10 @@ class TestUci:
         os.chdir(os.path.join(os.path.dirname(__file__), ".."))
         self.engine = UciEngine()
 
-        ret, _err_msg = self.engine.load("Engine\\pikafish_32bit\\pikafish-sse41.exe")
+        ret, _err_msg = self.engine.load(os.path.join("Engine", "pikafish_32bit", "pikafish-sse41.exe"))
+        if not ret and sys.platform != "win32":
+            pytest.skip("Skip engine test: engine not found or not executable on this platform")
+        
         assert ret is True
         assert self.engine.wait_for_ready() is True
         assert self.engine.engine_status == EngineStatus.READY
@@ -171,75 +180,12 @@ class TestUci:
                     move = board.move_iccs(iccs)
                     print(move.to_text())
                     assert move.to_iccs() == moves.pop(0)
-                    board.next_turn()
-                    break
-                elif action == "dead":
-                    # print(output)
-                    if board.move_player == cchess.RED:
-                        assert result == S_BLACK_WIN
-                    else:
-                        assert result == S_RED_WIN
-                    dead = True
-                    break
-                elif action == "draw":
-                    dead = True
-                    break
-
-            self.engine.stop_thinking()
-
-        self.engine.quit()
-
-        time.sleep(0.5)
-
-
-class TestUci:
-    def setup_method(self):
-        os.chdir(os.path.join(os.path.dirname(__file__), ".."))
-        self.engine = UciEngine()
-
-        ret, err_msg = self.engine.load("Engine\\pikafish_32bit\\pikafish-sse41.exe")
-        assert ret is True
-        assert self.engine.wait_for_ready() is True
-        assert self.engine.engine_status == EngineStatus.READY
-
-    def teardown_method(self):
-        if self.engine.process is not None and self.engine.process.returncode is None:
-            try:
-                self.engine.quit()
-            except Exception:
-                pass
-
-    def test_uci_endgame(self):
-        fen, moves, result = load_iccs_txt(Path("data", "uci_test_move.txt"))
-        # print(moves)
-        board = ChessBoard(fen)
-
-        dead = False
-        while not dead:
-            self.engine.go_from(board.to_fen(), {"depth": 8})
-            while True:
-                output = self.engine.get_action()
-                if output is None:
-                    time.sleep(0.2)
-                    continue
-                # print(output)
-                action = output["action"]
-                if action == "bestmove":
-                    # print(output)
-                    iccs = output["move"]
-                    move = board.move_iccs(iccs)
-                    print(move.to_text())
-                    assert move.to_iccs() == moves.pop(0)
-                    last_player = board.move_player
                     board.next_turn()
                     break
                 elif action == "info_move":
-                    # print(output)
                     pass
-
                 elif action == "dead":
                     # print(output)
-
                     if board.move_player == cchess.RED:
                         assert result == S_BLACK_WIN
                     else:
@@ -297,7 +243,11 @@ class TestEngineManager:
         options = {"LU_Output": "false", "Threads ": "8", "Hash ": "2000"}
 
         go_params = {"depth": 6}
-        self.mgr.load_uci("Engine\\pikafish_230408\\pikafish.exe", options, go_params)
+        ret, _err = self.mgr.load_uci(os.path.join("Engine", "pikafish_230408", "pikafish.exe"), options, go_params)
+        if not ret and sys.platform != "win32":
+            pytest.skip("Skip engine test: engine not found or not executable on this platform")
+        
+        assert ret is True
         file_name = Path("data", "030-黄松轩先胜冯敬如.XQF")
         game = Game.read_from(file_name)
         assert game.info["branchs"] == 2
@@ -334,6 +284,3 @@ class TestEngineManager:
                     )
                 else:
                     print(index + 1, fen, move.to_text(), "score:", result["score"])
-                    # print(result)
-        # self.cache.save()
-        # self.mgr.get_game_file_score(Path('data', '030-黄松轩先胜冯敬如.XQF'))

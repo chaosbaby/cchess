@@ -296,6 +296,10 @@ class Engine(Thread):  # pylint: disable=too-many-instance-attributes
         """
         logger.debug("--> %s", cmd_str)
 
+        if self.process is None:
+            self.engine_status = EngineStatus.ERROR
+            raise EngineErrorException("引擎进程未启动。")
+
         if self.process.returncode is not None:
             self.engine_status = EngineStatus.ERROR
             raise EngineErrorException(f"程序异常退出，退出码：{self.process.returncode}")
@@ -317,7 +321,7 @@ class Engine(Thread):  # pylint: disable=too-many-instance-attributes
 
     def wait_for_ready(self, timeout=10):
         """等待引擎进入 READY 状态，最多等待 `timeout` 秒。
-        在等待期间会间歇性地处理来自引擎的输出消息。
+        在等待期间会间歇性地处理来自引擎英的输出消息。
 
         参数:
             timeout (float): 超时时间（秒）
@@ -325,6 +329,9 @@ class Engine(Thread):  # pylint: disable=too-many-instance-attributes
         返回:
             bool: 引擎准备好返回 True，超时返回 False
         """
+        if self.process is None:
+            return False
+
         start_time = time.time()
 
         while True:
@@ -340,8 +347,12 @@ class Engine(Thread):  # pylint: disable=too-many-instance-attributes
 
     def quit(self):
         """发送 'quit' 命令终止引擎并短暂停顿以便进程退出。"""
-        self._send_cmd("quit")
-        time.sleep(0.2)
+        if self.process is not None:
+            try:
+                self._send_cmd("quit")
+            except Exception:
+                pass
+            time.sleep(0.2)
 
     def stop_thinking(self):
         """请求引擎停止正在进行的搜索并读取可能的返回信息。
@@ -628,29 +639,34 @@ class EngineManager():
             go_params (dict): 默认的 go 参数
 
         返回:
-            bool: 成功返回 True，否则 False
+            (bool, str): (是否成功, 错误消息)
         """
         self.engine = UciEngine()
         return self._load(engine_exec, options, go_params)
 
     def load_ucci(self, engine_exec, options, go_params):
-        """以 UCCI 协议加载并初始化引擎（类似 `load_uci`）。"""
+        """以 UCCI 协议加载并初始化引擎（类似 `load_uci`）。
+
+        返回:
+            (bool, str): (是否成功, 错误消息)
+        """
         self.engine = UcciEngine()
         return self._load(engine_exec, options, go_params)
 
     def _load(self, engine_exec, options, go_params):
         """内部加载引擎并应用选项。
 
-        返回 True 表示加载并准备就绪，False 表示失败。
+        返回:
+            (bool, str): (是否成功, 错误消息)
         """
 
-        ok = self.engine.load(engine_exec)
-        if not ok:
-            return False
+        res = self.engine.load(engine_exec)
+        if not res[0]:
+            return res
 
         ok = self.engine.wait_for_ready()
         if not ok:
-            return False
+            return (False, "Engine wait for ready timeout")
 
         #self.engine_options = options
         for name, value in options.items():
@@ -658,7 +674,7 @@ class EngineManager():
 
         self.go_params = go_params
 
-        return True
+        return (True, None)
 
     def get_best_cache(self, fen):
         """从缓存获取对给定 FEN 的最佳动作（若有）。"""
