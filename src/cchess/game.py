@@ -343,14 +343,17 @@ class Game:  # pylint: disable=too-many-public-methods
             file_name (str): 输出文件路径
         """
 
-        from .io_xqf import XQFWriter  # pylint: disable=import-outside-toplevel
-        from .io_pgn import PGNWriter  # pylint: disable=import-outside-toplevel
+        from .io_xqf import XQFWriter
+        from .io_pgn import PGNWriter
+        from .io_cbl import CbrWriter, CblWriter
 
         ext = pathlib.Path(file_name).suffix.lower()
         if ext == '.xqf':
             writer = XQFWriter(self)
         elif ext == '.pgn':
             writer = PGNWriter(self)
+        elif ext in ['.cbr', '.cbl']:
+            writer = CbrWriter(self)
         else:
             raise ValueError(f"Unknown file format:{file_name}")
 
