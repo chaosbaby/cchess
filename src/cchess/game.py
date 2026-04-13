@@ -354,6 +354,20 @@ class Game:  # pylint: disable=too-many-public-methods
             writer = PGNWriter(self)
         elif ext in ['.cbr', '.cbl']:
             writer = CbrWriter(self)
+        elif ext == '.fen':
+            with open(file_name, 'w', encoding='utf-8') as f:
+                f.write(self.init_board.to_fen())
+            return True
+        elif ext == '.txt':
+            with open(file_name, 'w', encoding='utf-8') as f:
+                for line in self.dump_text_moves():
+                    f.write(" ".join(line) + "\n")
+            return True
+        elif ext == '.ubb':
+            # 简单的 UBB 导出 (占位实现)
+            with open(file_name, 'w', encoding='utf-8') as f:
+                f.write(f"[DhtmlXQ_fen]{self.init_board.to_fen()}[/DhtmlXQ_fen]")
+            return True
         else:
             raise ValueError(f"Unknown file format:{file_name}")
 
