@@ -92,3 +92,4 @@ ENV/
 
 uv.lock
 master.db
+manual_verify_out/
