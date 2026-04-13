@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 ElephantBridge (CBR/CBL) format writer.
-Strictly calibrated with CCBridge staggered offset logic.
+Strictly calibrated for CCBridge (PC Version) compatibility.
 """
 
 import struct
 import os
+import uuid
 from .common import RED, BLACK
 
 class CbrWriter:
@@ -81,49 +82,46 @@ class CbrWriter:
         return self.data
 
 class CblWriter:
-    """写入兼容象棋桥的库文件（修复阶梯偏移和摘要表）。"""
+    """写入兼容 PC 原生象棋桥的库文件。"""
     def __init__(self, games):
         self.games = games
         
     def save(self, file_name):
         count = len(self.games)
         
-        # 1. 严格对标象棋桥的阶梯偏移算法
-        if count <= 128:
-            header_size = 101952
-        elif count <= 256:
-            header_size = 137280
-        elif count <= 384:
-            header_size = 151080
-        elif count <= 512:
-            header_size = 207936
-        else:
-            header_size = 349248
+        # 1. 阶梯偏移算法
+        if count <= 128: header_size = 101952
+        elif count <= 256: header_size = 137280
+        elif count <= 384: header_size = 151080
+        elif count <= 512: header_size = 207936
+        else: header_size = 349248
             
         header = bytearray(b"\x00" * header_size)
         header[0:16] = b"CCBridgeLibrary\x00"
-        
-        # 2. 写入局数
         struct.pack_into("<i", header, 60, count)
         
-        # 3. 填充摘要表 (Summary Table)
-        # 象棋桥在摘要表中存储了 UUID 和基础元数据
-        # 我们至少需要写入开始标识 0x07 和局索引
+        # 2. 填充摘要表 (Summary Table)
+        # Entry Size: 276 bytes
         for i in range(count):
             summary_offset = 66624 + (i * 276)
-            if summary_offset + 276 > header_size:
-                break
+            if summary_offset + 276 > header_size: break
+            
+            # [0] 标识 (07 00 00 00)
             struct.pack_into("<i", header, summary_offset, 0x07)
-            # 尝试填充标题到摘要（部分软件需要在此处看到标题）
-            title = self.games[i].info.get("title", f"Game {i+1}")
+            # [8] 激活标识 (01 00 00 00)
+            struct.pack_into("<i", header, summary_offset + 8, 0x01)
+            
+            # [24] UUID (象棋桥识别记录的重要标识)
+            dummy_uuid = f"{{{str(uuid.uuid4()).upper()}}}".encode("utf-16-le")
+            header[summary_offset+24:summary_offset+24+len(dummy_uuid)] = dummy_uuid
+            
+            # [104] 标题 (PC 版象棋桥从摘要表读取列表标题)
+            title = self.games[i].info.get("title") or f"Game {i+1}"
             try:
-                encoded_title = title.encode("utf-16-le")[:60]
-                # 假设标题在摘要项的某个偏移位置，这里我们先保证 0x07 正确
-                # 并确保局索引对应
-                struct.pack_into("<i", header, summary_offset + 8, i)
+                encoded_title = title.encode("utf-16-le")[:120]
+                header[summary_offset+104:summary_offset+104+len(encoded_title)] = encoded_title
             except: pass
         
-        # 4. 写入文件
         with open(file_name, "wb") as f:
             f.write(header)
             for g in self.games:
