@@ -38,7 +38,6 @@ def main():
             
         target_format = args.to.lower()
         
-        # 确定输出路径
         if args.output:
             output_path = Path(args.output)
         else:
@@ -57,12 +56,12 @@ def main():
         files = list(walk_files(input_path, recursive=args.recursive, max_level=args.level))
         print(f"Found {len(files)} files. Starting conversion...")
         
-        if target_format == "cbl" and (is_batch or len(files) > 1):
-            # 特殊处理：合并到 CBL 库
-            print(f"Merging {len(files)} files into library {output_path}...")
+        # 修正: 如果目标是 CBL，无论输入多少文件，都视为“库操作”
+        if target_format == "cbl":
+            print(f"Creating CBL library {output_path}...")
             batch_convert_to_cbl(files, output_path)
         else:
-            # 常规逐个处理 (包含 UIM 批量事务)
+            # 常规逐个处理
             uim_conn = None
             if target_format == "uim":
                 uim_conn = init_db(str(output_path))
