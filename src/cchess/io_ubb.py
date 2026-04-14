@@ -2,6 +2,7 @@
 """
 UBB (DhtmlXQ) format writer for CChess.
 Follows standard DhtmlXQ format with separate tags for moves, variations and comments.
+Uses GB18030 encoding for CCBridge compatibility.
 """
 
 class UBBWriter:
@@ -74,7 +75,6 @@ class UBBWriter:
                 for v_idx, v in enumerate(curr.get_variations()):
                     self.variation_counter += 1
                     new_var_id = self.variation_counter
-                    # Variations start at the SAME step as the parent move
                     v_seq = self._collect_data(v, new_var_id, step)
                     self.moves_tags.append((f"DhtmlXQ_move_{var_id}_{step}_{new_var_id}", v_seq))
             
@@ -126,6 +126,7 @@ class UBBWriter:
         return "\n".join(res)
 
     def save(self, file_path):
-        with open(file_path, "w", encoding="utf-8") as f:
+        # Use GB18030 for CCBridge compatibility
+        with open(file_path, "w", encoding="gb18030", errors="replace") as f:
             f.write(self.generate_ubb())
         return True

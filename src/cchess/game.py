@@ -360,18 +360,11 @@ class Game:  # pylint: disable=too-many-public-methods
             with open(file_name, 'w', encoding='utf-8') as f:
                 f.write(self.init_board.to_fen())
             return True
-        elif ext == '.txt':
-            with open(file_name, 'w', encoding='utf-8') as f:
-                # Only export main line for TXT compatibility
-                main_line = self.move_line_to_list()
-                txt_moves = [m.to_text() for m in main_line]
-                f.write(" ".join(txt_moves) + "\n")
-            return True
-        elif ext == '.ubb':
+        elif ext in ['.txt', '.ubb']:
             from .io_ubb import UBBWriter
             writer = UBBWriter(self)
             return writer.save(file_name)
-        else:
+
             raise ValueError(f"Unknown file format:{file_name}")
 
         return writer.save(file_name)

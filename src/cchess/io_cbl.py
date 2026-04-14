@@ -21,6 +21,7 @@ class CbrWriter:
     def _set_str(self, offset, text, length):
         if not text: return
         try:
+            # CCBridge CBR uses UTF-16LE for metadata strings inside the record
             encoded = text.encode("utf-16-le")
             to_write = encoded[:length-2]
             for i, b in enumerate(to_write):
@@ -45,7 +46,6 @@ class CbrWriter:
         if move.annote: mark |= 0x04
         
         start_off = self.offset
-        # Structure: AA BB CC DD
         self.data[start_off] = mark
         self.data[start_off+1] = 0x00
         self.data[start_off+2] = self._encode_pos(move.p_from)
@@ -104,6 +104,12 @@ class CbrWriter:
             self._write_node(self.game.first_move)
             
         self.used_size = self.offset
+        
+        # Ensure 4096 alignment for multi-game CBL compatibility
+        pad = (4096 - (self.used_size % 4096)) % 4096
+        self.data.extend(b"\x00" * pad)
+        self.used_size += pad
+        
         if file_name:
             with open(file_name, "wb") as f:
                 f.write(self.data[:self.used_size])
@@ -116,30 +122,39 @@ class CblWriter:
         
     def save(self, file_name):
         count = len(self.games)
-        if count <= 128: h_size = 101952
-        else: h_size = 207936
+        # Determine header size based on slot count
+        if count <= 128: h_size = 101952; slots = 128
+        elif count <= 256: h_size = 207936; slots = 256
+        else: h_size = 413952; slots = 512 # Expand if needed
         
         header = bytearray(b"\x00" * h_size)
         header[0:16] = b"CCBridgeLibrary\x00"
         struct.pack_into("<i", header, 16, 0x03)
         header[20:36] = self.lib_uuid.bytes_le
         header[52:56] = b"\xFF\xFF\xFF\x7F"
-        struct.pack_into("<i", header, 60, 128 if count <= 128 else 256)
+        struct.pack_into("<i", header, 60, slots)
         
         blocks = []
         for g in self.games:
             w = CbrWriter(g)
             blocks.append((w.save(), w.used_size, w.game_uuid))
             
+        current_data_offset = h_size
         for i in range(len(blocks)):
             off = 66624 + (i * 276)
             if off + 276 > h_size: break
+            
+            # Record Info Block
             struct.pack_into("<i", header, off, 0x07)
             struct.pack_into("<i", header, off+4, i)
-            struct.pack_into("<i", header, off+8, 0x01)
-            struct.pack_into("<i", header, off+12, len(blocks[i][0]))
+            struct.pack_into("<i", header, off+8, 0x01) # State?
+            struct.pack_into("<i", header, off+12, len(blocks[i][0])) # Real size
+            
+            # UUID in curly braces, UTF-16LE
             u_str = f"{{{str(blocks[i][2]).upper()}}}".encode("utf-16-le")
             header[off+24:off+24+len(u_str)] = u_str
+            
+            # Title, UTF-16LE
             info = self.games[i].info
             t = self._get_title(info) or f"Game {i+1}"
             try:

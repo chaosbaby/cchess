@@ -93,3 +93,6 @@ ENV/
 uv.lock
 master.db
 manual_verify_out/
+data/one_source
+verify_multi_games
+verify_one_source
