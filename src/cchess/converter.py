@@ -50,7 +50,14 @@ def convert_file(input_path: Path, target_format: str, output_path: Path, uim_co
     执行单个文件的转换。
     """
     target_format = target_format.lower()
-    
+
+    # 格式到后缀的映射
+    ext_mapping = {
+        'ubb': 'txt',
+        'cbl': 'cbr' # 单个文件转cbl实际上是存为cbr块
+    }
+    target_ext = ext_mapping.get(target_format, target_format)
+
     # 特殊处理：如果是从 CBL 转出，可能包含多局
     if input_path.suffix.lower() == ".cbl":
         lib_data = Game.read_from_lib(str(input_path))
@@ -60,24 +67,17 @@ def convert_file(input_path: Path, target_format: str, output_path: Path, uim_co
             if target_format == "uim":
                 _save_game_to_uim(g, uim_conn)
             else:
-                out_f = output_path / f"{input_path.stem}_{i}.{target_format}"
+                out_f = output_path / f"{input_path.stem}_{i}.{target_ext}"
                 g.save_to(str(out_f))
         return
 
     game = Game.read_from(str(input_path))
-    
+
     if target_format == "uim":
         _save_game_to_uim(game, uim_conn if uim_conn else init_db(str(output_path)))
-        if not uim_conn:
-            # 这种情况下 convert_file 自己开了连接，应该自己关 (但实际这种调用较少)
-            pass 
-    elif target_format == "cbl":
-        if output_path.is_dir():
-            output_file = output_path / (input_path.stem + ".cbr")
-            game.save_to(str(output_file))
     else:
         if output_path.is_dir():
-            output_file = output_path / (input_path.stem + "." + target_format)
+            output_file = output_path / (input_path.stem + "." + target_ext)
         else:
             output_file = output_path
         game.save_to(str(output_file))
