@@ -83,7 +83,7 @@ def convert_file(input_path: Path, target_format: str, output_path: Path, uim_co
         game.save_to(str(output_file))
 
 def _save_game_to_uim(game, conn):
-    """内部函数：将单局 Game 存入 UIM 数据库。"""
+    """内部函数：将整棵 Game 走子树存入 UIM 数据库。"""
     red = game.info.get('red', 'Unknown')
     black = game.info.get('black', 'Unknown')
     date = game.info.get('date', 'Unknown')
@@ -92,19 +92,28 @@ def _save_game_to_uim(game, conn):
     
     game_id = save_game(conn, red, black, date, result, event)
     
-    move_lines = game.dump_moves()
-    if not move_lines:
-        save_node(conn, game.init_board)
-    else:
-        main_line = move_lines[0]['moves']
-        board = game.init_board.copy()
-        prev_hash = save_node(conn, board)
+    # 保存初始节点
+    board = game.init_board.copy()
+    start_hash = save_node(conn, board)
+    
+    if not game.first_move:
+        return
+
+    # 递归遍历走子树
+    def save_tree(move, prev_hash):
+        # 保存当前走子产生的边
+        curr_hash = save_node(conn, move.board_done)
+        save_edge(conn, prev_hash, curr_hash, move.to_iccs(), game_id)
         
-        for move in main_line:
-            board.move_iccs(move.to_iccs())
-            curr_hash = save_node(conn, board)
-            save_edge(conn, prev_hash, curr_hash, move.to_iccs(), game_id)
-            prev_hash = curr_hash
+        # 递归处理下一步及其变招
+        if move.next_move:
+            # 遍历该位置的所有子节点（主线+变招）
+            for child in move.next_move.variations_all:
+                save_tree(child, curr_hash)
+
+    # 从第一步的所有变招开始
+    for m in game.first_move.variations_all:
+        save_tree(m, start_hash)
 
 def batch_convert_to_cbl(input_files: List[Path], output_file: Path):
     """

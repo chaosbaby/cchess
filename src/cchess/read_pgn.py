@@ -1,162 +1,48 @@
 # -*- coding: utf-8 -*-
-"""
-Copyright (C) 2024  walker li <walker8088@gmail.com>
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""
-
-import re
-
-import chardet
-
-from .exception import CChessException
+import re, chardet
 from .common import FULL_INIT_FEN
 from .board import ChessBoard
 
-# 读取PGN文件的简易版本
-
-
-# -----------------------------------------------------#
 def read_from_pgn(file_name):
-    """从 PGN 文件读取并解析为 `Game` 对象。"""
-    # 避免循环导入
-    from .game import Game  # pylint: disable=import-outside-toplevel
-
-    board = ChessBoard(FULL_INIT_FEN)
-    game = Game(board)
-
-    with open(file_name, "rb") as f:
-        raw = f.read()
-
-    # 优先尝试 utf-8，失败后尝试 GBK（PGN 文件常见编码），
-    # 最后才依赖 chardet 的检测结果
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            text = raw.decode("gbk")
-        except UnicodeDecodeError:
-            detected = chardet.detect(raw)
-            encoding = detected.get("encoding", "gbk")
-            if encoding and encoding.lower().startswith("utf"):
-                encoding = "gbk"
-            text = raw.decode(encoding, errors="replace")
-    flines = text.splitlines()
-
-    lines = []
-    for line in flines:
-        it = line.strip()
-
-        if len(it) == 0:
-            continue
-
-        lines.append(it)
-
-    lines = __get_headers(game, lines)
-    # lines, docs = __get_comments(lines)
-    # infos["Doc"] = docs
-    __get_steps(game, lines)
-
-    return game
-
-
-def __get_headers(game, lines):
-    index = 0
-    for it in lines:
-        line = it.strip()
-        # 匹配 [] 并取出包含的内容
-        pattern1 = r"\[([^\[\]]*)\]"
-        # 匹配并捕获xxx和YYYY（不包括引号），且它们之间至少有一个空格
-        pattern2 = r'(\w+)\s+"\s*([^"]+)"'
-        matches = re.findall(pattern1, line)
-        if len(matches) == 0:
-            return lines[index:]
-        for text in matches:
-            # print(text)
-            match = re.search(pattern2, text)
-            if match:
-                # match.groups()会返回一个包含所有捕获组的元组
-                # 我们可以通过索引来访问它们
-                name = match.group(1).lower()
-                value = match.group(2)
-                if name.lower() == "fen":
-                    game.init_board = ChessBoard(value)
-                else:
-                    game.info[name] = value
-
-        # if len(items) < 3:
-        #    raise CChessException(f"Format Error on line {index + 1}")
-
-        # self.infos[str(items[0]).strip()] = items[1].strip()
-
-        index += 1
-
-    return []
-
-
-def __get_comments(lines):
-    if lines[0][0] != "{":
-        return (lines, None)
-
-    docs = lines[0][1:]
-
-    # 处理一注释行的情况
-    if docs[-1] == "}":
-        return (lines[1:], docs[:-1].strip())
-
-    # 处理多行注释的情况
-    index = 1
-
-    for line in lines[1:]:
-        if line[-1] == "}":
-            docs = docs + "\n" + line[:-1]
-            return (lines[index + 1 :], docs.strip())
-
-        docs = docs + "\n" + line
-        index += 1
-
-    # 代码能运行到这里，就是出了异常了
-    raise CChessException("Comments not closed")
-
-
-def __get_steps(game, lines):
-    steps = []
-
-    board = game.init_board.copy()
-
-    use_iccs = "format" in game.info and game.info["format"].lower() == "iccs"
-
-    for line in lines:
-        if line in ["*", "1-0", "0-1", "1/2-1/2"]:
-            return steps
-
-        for _, it in enumerate(line.split(" ")):
-            if it in ["*", "1-0", "0-1", "1/2-1/2"]:
-                break
-            if it.endswith("."):
-                continue
-            if use_iccs:
-                if len(it) == 5:
-                    new_it = it[:2] + it[3:]
-                else:
-                    new_it = it
-                move = board.move_iccs(new_it.lower())
-            else:
-                move = board.move_text(it)
-            if move is None:
-                return game
-            board.next_turn()
-            game.append_next_move(move)
-
+    from .game import Game
+    with open(file_name, "rb") as f: raw = f.read()
+    try: text = raw.decode("utf-8")
+    except: text = raw.decode("gbk", errors="replace")
+    game = Game(ChessBoard(FULL_INIT_FEN))
+    rem = []
+    for l in text.splitlines():
+        if l.startswith('['):
+            m = re.search(r'\[(\w+)\s+"([^"]+)"\]', l)
+            if m and m.group(1).lower() == "fen": game.init_board = ChessBoard(m.group(2))
+            elif m: game.info[m.group(1).lower()] = m.group(2)
+        else: rem.append(l)
+    tokens = re.findall(r'\{.*?\}|\(|\)|[^\s\(\)\{\}]+', ' '.join(rem))
+    
+    stack = [] # (board, parent_node, last_move_in_parent)
+    curr_board = game.init_board.copy()
+    parent = game
+    last = None
+    
+    for t in tokens:
+        if t in ["*", "1-0", "0-1", "1/2-1/2"]: break
+        elif t.startswith('{'):
+            if last: last.annote = t[1:-1].strip()
+            else: game.annote = t[1:-1].strip()
+        elif t == '(':
+            stack.append((curr_board.copy(), parent, last))
+            # 变招基于 last 之前的棋盘状态
+            curr_board = last.board.copy() if last else game.init_board.copy()
+            last = None # 变招层级尚未开始
+        elif t == ')':
+            if stack: curr_board, parent, last = stack.pop()
+        elif re.match(r'^\d+\.*$', t): continue
+        else:
+            s = t.rstrip('.').replace('+', '').replace('#', '')
+            if not s: continue
+            m = curr_board.move_iccs(s.lower()) if len(s)>=4 and re.match(r'^[a-i][0-9]', s) else curr_board.move_text(s)
+            if m:
+                if last: last.append_next_move(m)
+                else: parent.append_next_move(m)
+                last = m
+                curr_board.next_turn()
     return game

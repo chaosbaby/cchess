@@ -233,7 +233,7 @@ class Move:
         if not self.next_move:
             self.next_move = chess_move
         else:
-            self.next_move.variations_all.append(chess_move)
+            self.next_move.add_variation(chess_move)
 
     def dump_moves(
         self, move_list, curr_move_line, is_tree_mode, curr_variation_index=0

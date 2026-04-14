@@ -1,183 +1,96 @@
 # -*- coding: utf-8 -*-
-'''
-Copyright (C) 2024  walker li <walker8088@gmail.com>
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-'''
 import re
-
 from .exception import CChessException
 from .common import fench_to_species, FULL_INIT_FEN
 from .board import ChessBoard
 
+def decode_txt_pos(pos): return (int(pos[0]), 9 - int(pos[1]))
 
-#-----------------------------------------------------#
-def decode_txt_pos(pos):
-    """将两位文本坐标转换为棋盘坐标。"""
-    return (int(pos[0]), 9 - int(pos[1]))
-
-
-#-----------------------------------------------------#
-def read_from_txt(moves_txt, pos_txt=None):  # pylint: disable=too-many-locals
-    """从文本棋谱字符串读取并返回 `Game` 对象。"""
-    #避免循环导入
-    from .game import Game  # pylint: disable=import-outside-toplevel
-
-    #车马相士帅士相马车炮炮兵兵兵兵兵
-    #车马象士将士象马车炮炮卒卒卒卒卒
-    chessman_kinds = 'RNBAKABNRCCPPPPP'
-
-    if not pos_txt:
-        board = ChessBoard(FULL_INIT_FEN)
-    else:
-        if len(pos_txt) != 64:
-            raise CChessException("bad pos_txt")
-
-        board = ChessBoard()
-        for side in range(2):
-            for man_index in range(16):
-                pos_index = (side * 16 + man_index) * 2
-                man_pos = pos_txt[pos_index:pos_index + 2]
-                if man_pos == '99':
-                    continue
-                pos = decode_txt_pos(man_pos)
-                fen_ch = chr(ord(chessman_kinds[man_index]) + side * 32)
-                board.put_fench(fen_ch, pos)
-
-    last_move = None
-    if not moves_txt:
-        return Game(board)
-
-    step_no = 0
-    while step_no * 4 < len(moves_txt):
-        #steps = moves_txt[step_no * 4:step_no * 4 + 4]
-
-        move_from = decode_txt_pos(moves_txt[step_no * 4:step_no * 4 + 2])
-        move_to = decode_txt_pos(moves_txt[step_no * 4 + 2:step_no * 4 + 4])
-
-        if board.is_valid_move(move_from, move_to):
-
-            if not last_move:
-                _, man_side = fench_to_species(board.get_fench(move_from))
-                board.move_side = man_side
-                game = Game(board)
-                last_move = game
-
-            new_move = board.move(move_from, move_to)
-            last_move.append_next_move(new_move)
-            last_move = new_move
-            board.next_turn()
-        else:
-            raise CChessException(
-                f"bad move at {step_no} {move_from} {move_to}")
-        step_no += 1
-    if step_no == 0:
-        game = Game(board)
-
+def read_from_txt(moves_txt, pos_txt=None):
+    from .game import Game
+    board = ChessBoard(FULL_INIT_FEN if not pos_txt else None)
+    if pos_txt:
+        kinds = 'RNBAKABNRCCPPPPP'
+        for s in range(2):
+            for i in range(16):
+                p_idx = (s*16+i)*2; m_p = pos_txt[p_idx:p_idx+2]
+                if m_p != '99': board.put_fench(chr(ord(kinds[i])+s*32), decode_txt_pos(m_p))
+    game = Game(board)
+    if not moves_txt: return game
+    curr = game; b = board.copy()
+    for i in range(0, len(moves_txt), 4):
+        m = b.move(decode_txt_pos(moves_txt[i:i+2]), decode_txt_pos(moves_txt[i+2:i+4]))
+        if m: curr.append_next_move(m); curr = m; b.next_turn()
     return game
 
+def ubb_to_dict(ubb):
+    content = ubb
+    m = re.search(r'\[DhtmlXQHTML\](.*?)\[/DhtmlXQHTML\]', ubb, re.S)
+    if m: content = m.group(1)
+    return {k: v.strip() for k, v in re.findall(r'\[DhtmlXQ_([^]]+)\](.*?)\[/DhtmlXQ_\1\]', content, re.S)}
 
-#-----------------------------------------------------#
-def ubb_to_dict(ubb_text):
-    """解析 UBB 的 DhtmlXQHTML 片段并返回键值字典。"""
-    # 先提取整个 [DhtmlXQHTML] ... [/DhtmlXQHTML] 块的内容（去掉外层标签）
-    block_match = re.search(r'\[DhtmlXQHTML\](.*?)\[/DhtmlXQHTML\]', ubb_text,
-                            re.DOTALL)
-    if not block_match:
-        return "{}"
-
-    content = block_match.group(1)
-
-    # 正则匹配所有 [DhtmlXQ_xxx]value[/DhtmlXQ_xxx]
-    pattern = r'\[DhtmlXQ_([^]]+)\](.*?)\[/DhtmlXQ_\1\]'
-    matches = re.findall(pattern, content, re.DOTALL)
-
-    result = {}
-    for key, value in matches:
-        cleaned_value = value.strip()
-        result[key] = cleaned_value
-
-    return result
-
-
-#-----------------------------------------------------#
-def txt_to_board(pos_txt):
-    """将局面文本编码转换为 `ChessBoard`。"""
-
-    #车马相士帅士相马车炮炮兵兵兵兵兵
-    #车马象士将士象马车炮炮卒卒卒卒卒
-    chessman_kinds = 'RNBAKABNRCCPPPPP'
-
-    if not pos_txt:
-        board = ChessBoard(FULL_INIT_FEN)
-    else:
-        if len(pos_txt) != 64:
-            raise CChessException("bad pos_txt")
-
-        board = ChessBoard()
-        for side in range(2):
-            for man_index in range(16):
-                pos_index = (side * 16 + man_index) * 2
-                man_pos = pos_txt[pos_index:pos_index + 2]
-                if man_pos == '99':
-                    continue
-                pos = decode_txt_pos(man_pos)
-                fen_ch = chr(ord(chessman_kinds[man_index]) + side * 32)
-                board.put_fench(fen_ch, pos)
-
+def txt_to_board(pos):
+    board = ChessBoard(FULL_INIT_FEN if not pos else None)
+    if pos:
+        kinds = 'RNBAKABNRCCPPPPP'
+        for s in range(2):
+            for i in range(16):
+                p_idx = (s*16+i)*2; m_p = pos[p_idx:p_idx+2]
+                if m_p != '99': board.put_fench(chr(ord(kinds[i])+s*32), decode_txt_pos(m_p))
     return board
 
+def read_from_ubb_dhtml(ubb):
+    from .game import Game
+    info = ubb_to_dict(ubb)
+    if not info: return None
+    board = txt_to_board(info.get('binit'))
+    game = Game(board); game.info = info
+    
+    comments = {}
+    for k, v in info.items():
+        if k.startswith('comment'):
+            tag = k[7:]; parts = tag.split('_')
+            v_id, step = (int(parts[0]), int(parts[1])) if '_' in tag else (0, int(tag))
+            comments[(v_id, step)] = v
 
-#-----------------------------------------------------#
-def txt_to_moves(board, moves_txt):
-    """将走子文本解析为 `Move` 列表。"""
-    moves = []
-    step_no = 0
-    while step_no * 4 < len(moves_txt):
-        move_from = decode_txt_pos(moves_txt[step_no * 4:step_no * 4 + 2])
-        move_to = decode_txt_pos(moves_txt[step_no * 4 + 2:step_no * 4 + 4])
+    branches = {}
+    for k, v in info.items():
+        if k.startswith('move_'):
+            p_var, step, n_var = map(int, k.split('_')[1:4])
+            branches.setdefault((p_var, step), []).append((n_var, v))
 
-        if board.is_valid_move(move_from, move_to):
+    def build(var_id, start_step, parent_node, current_board):
+        seq = info.get('movelist') if var_id == 0 else None
+        if var_id > 0:
+            for (p, s), blist in branches.items():
+                for nv, s_seq in blist:
+                    if nv == var_id: seq = s_seq; break
+                if seq: break
+        if not seq: return
 
-            if len(moves) == 0:
-                _, man_side = fench_to_species(board.get_fench(move_from))
-                board.move_side = man_side
+        b = current_board.copy()
+        curr = parent_node
+        
+        for i in range(0, len(seq), 4):
+            step_idx = start_step + (i // 4)
+            m_str = seq[i:i+4]
+            b_pre = b.copy()
+            m = b.move(decode_txt_pos(m_str[0:2]), decode_txt_pos(m_str[2:4]))
+            if not m: break
+            
+            m.annote = comments.get((var_id, step_idx))
+            if var_id > 0 and i == 0:
+                # First move of variation: must be sibling of parent_node
+                # Actually, the logic should be: parent_node was the main move at this step
+                parent_node.add_variation(m)
+            else:
+                if var_id == 0 and i == 0: game.append_first_move(m)
+                else: curr.append_next_move(m)
+            
+            for nv, n_seq in branches.get((var_id, step_idx), []):
+                build(nv, step_idx, m, b_pre.copy())
+            
+            b.next_turn(); curr = m
 
-            new_move = board.move(move_from, move_to)
-            moves.append(new_move)
-            board.next_turn()
-        else:
-            raise CChessException(
-                f"bad move at {step_no} {move_from} {move_to}")
-        step_no += 1
-
-    return moves
-
-
-#-----------------------------------------------------#
-def read_from_ubb_dhtml(ubb_text):
-    """从 UBB DHTML 文本读取并返回 `Game` 对象。"""
-    #避免循环导入
-    from .game import Game  # pylint: disable=import-outside-toplevel
-
-    info = ubb_to_dict(ubb_text)
-    board = txt_to_board(info['binit'])
-    moves = txt_to_moves(board, info['movelist'])
-
-    game = Game(board)
-    game.info = info
-    for move in moves:
-        game.append_next_move(move)
-
+    build(0, 1, game, board)
     return game

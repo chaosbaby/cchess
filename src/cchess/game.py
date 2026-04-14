@@ -352,22 +352,25 @@ class Game:  # pylint: disable=too-many-public-methods
             writer = XQFWriter(self)
         elif ext == '.pgn':
             writer = PGNWriter(self)
-        elif ext in ['.cbr', '.cbl']:
+        elif ext == '.cbr':
             writer = CbrWriter(self)
+        elif ext == '.cbl':
+            writer = CblWriter([self])
         elif ext == '.fen':
             with open(file_name, 'w', encoding='utf-8') as f:
                 f.write(self.init_board.to_fen())
             return True
         elif ext == '.txt':
             with open(file_name, 'w', encoding='utf-8') as f:
-                for line in self.dump_text_moves():
-                    f.write(" ".join(line) + "\n")
+                # Only export main line for TXT compatibility
+                main_line = self.move_line_to_list()
+                txt_moves = [m.to_text() for m in main_line]
+                f.write(" ".join(txt_moves) + "\n")
             return True
         elif ext == '.ubb':
-            # 简单的 UBB 导出 (占位实现)
-            with open(file_name, 'w', encoding='utf-8') as f:
-                f.write(f"[DhtmlXQ_fen]{self.init_board.to_fen()}[/DhtmlXQ_fen]")
-            return True
+            from .io_ubb import UBBWriter
+            writer = UBBWriter(self)
+            return writer.save(file_name)
         else:
             raise ValueError(f"Unknown file format:{file_name}")
 

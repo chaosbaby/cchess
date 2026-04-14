@@ -53,18 +53,16 @@ result_dict = {0: "*", 1: "1-0", 2: "0-1", 3: "1/2-1/2", 4: "1/2-1/2"}
 
 # -----------------------------------------------------#
 def _decode_pos(p):
-    return (p % 9, 9 - p // 9)
+    return (p % 9, p // 9)
 
 
 def cut_bytes_to_str(buff):
     """将字节缓冲区截断到首个空字节并解码为字符串。"""
     end_index = buff.find(b"\x00\x00")
-    # TODO 探查一下error原因
     if end_index >= 0:
         annote = buff[:end_index].decode(CODING_PAGE_CBR, errors="ignore")
     else:
         annote = buff.decode(CODING_PAGE_CBR, errors="ignore")
-    # print(end_index, len(buff), annote)
     return annote
 
 
@@ -87,7 +85,7 @@ class CbrBuffDecoder:
 
     def is_end(self):
         """判断是否已读取缓冲区末尾。"""
-        return (self.length - self.index - 1) == 0
+        return (self.length - self.index) < 4
 
     def read_str(self, size):
         """读取指定字节并解码为字符串（去除末尾空字节）。"""
@@ -98,22 +96,17 @@ class CbrBuffDecoder:
         """读取指定字节并返回 bytearray。"""
         return bytearray(self.__read(size))
 
-    def read_int8(self):
-        """读取 1 字节并返回有符号整数。"""
-        data = self.read_bytes(1)
-        return struct.unpack("<b", data)[0]
-
     def read_int(self):
         """读取 4 字节并按小端序返回有符号整数。"""
         data = self.read_bytes(4)
-        # return bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24)
         return struct.unpack("<i", data)[0]
 
 
 # -----------------------------------------------------#
 def __read_init_info(buff_decoder):
     """读取并返回走子前的初始化注释信息。"""
-    # 注释长度, 为0则没有注释
+    if buff_decoder.is_end():
+        return ""
     a_len = buff_decoder.read_int()
     if a_len == 0:
         return ""
@@ -129,7 +122,7 @@ def __read_steps(buff_decoder, game, parent_move, board):
 
     step_info = buff_decoder.read_bytes(4)
 
-    if len(step_info) == 0:
+    if len(step_info) < 4:
         return
 
     if step_info == b"\x00\x00\x00\x00":
@@ -137,46 +130,39 @@ def __read_steps(buff_decoder, game, parent_move, board):
 
     step_mark, _step_none, step_from, step_to = step_info
 
-    # 棋谱分支结束
-    if step_mark & 0x01:
-        has_next_move = False
-    else:
-        has_next_move = True
-
-    # 有变招
+    has_next_move = not (step_mark & 0x01)
     has_var_step = bool(step_mark & 0x02)
 
-    # 有注释
     if step_mark & 0x04:
         annote_len = buff_decoder.read_int()
+        annote = buff_decoder.read_str(annote_len) if annote_len > 0 else None
     else:
-        annote_len = 0
+        annote = None
 
     board_bak = board.copy()
+    
     move_from = _decode_pos(step_from)
     move_to = _decode_pos(step_to)
-    annote = buff_decoder.read_str(annote_len) if annote_len > 0 else None
 
-    fench = board.get_fench(move_from)
-    if not fench:
-        return
-    _, man_side = fench_to_species(fench)
-    board.move_player = ChessPlayer(man_side)
-
-    if board.is_valid_move(move_from, move_to):
+    curr_move = None
+    try:
+        if not board.is_valid_move(move_from, move_to):
+            board.move_player = board.move_player.opposite()
+            
         curr_move = board.move(move_from, move_to)
-        curr_move.annote = annote
-        if parent_move:
-            parent_move.append_next_move(curr_move)
-        else:
-            game.append_first_move(curr_move)
-        good_move = curr_move
-    else:
-        return
+        if curr_move:
+            board.next_turn()
+            curr_move.annote = annote
+            if parent_move:
+                parent_move.append_next_move(curr_move)
+            else:
+                game.append_first_move(curr_move)
+    except:
+        pass
 
-    if has_next_move:
-        __read_steps(buff_decoder, game, good_move, board)
-
+    if curr_move and has_next_move:
+        __read_steps(buff_decoder, game, curr_move, board)
+    
     if has_var_step:
         __read_steps(buff_decoder, game, parent_move, board_bak)
 
@@ -184,6 +170,9 @@ def __read_steps(buff_decoder, game, parent_move, board):
 # -----------------------------------------------------#
 def read_from_cbr_buffer(contents):
     """从 CBR 文件的字节内容解析并返回 `Game` 对象。"""
+    if len(contents) < 2218:
+        return None
+        
     (
         magic,
         _is1,
@@ -217,18 +206,14 @@ def read_from_cbr_buffer(contents):
     game_info["red"] = cut_bytes_to_str(red)
     game_info["black"] = cut_bytes_to_str(black)
     game_info["result"] = result_dict[game_result]
-    # game_info['steps'] = steps
+    
     board = ChessBoard()
-    if move_side == 1:
-        board.move_player = ChessPlayer(RED)
-    else:
-        board.move_player = ChessPlayer(BLACK)
+    board.move_player = ChessPlayer(RED) if move_side in [0, 1] else ChessPlayer(BLACK)
 
-    for x in range(9):
-        for y in range(10):
-            v = boards[y * 9 + x]
-            if v in piece_dict:
-                board.put_fench(piece_dict[v], (x, 9 - y))
+    for i in range(90):
+        v = boards[i]
+        if v in piece_dict:
+            board.put_fench(piece_dict[v], (i % 9, i // 9))
 
     buff_decoder = CbrBuffDecoder(contents[2214:], CODING_PAGE_CBR)
     game_annote = __read_init_info(buff_decoder)
@@ -265,95 +250,21 @@ def read_from_cbl(file_name, verify=True):  # pylint: disable=unused-argument
     lib_info["name"] = cut_bytes_to_str(lib_name)
     lib_info["games"] = []
 
-    buff_start = 101952
-
-    game_buffer = contents[buff_start:]
-    game_buffer_len = len(game_buffer)
-    game_buffer_index = game_buffer.find(b"CCBridge Record")
-    if game_buffer_index < 0:
+    idx = contents.find(b"CCBridge Record")
+    if idx < 0:
         return lib_info
 
-    if ((game_buffer_len - game_buffer_index) % 4096) != 0:
-        raise CChessException(
-            f"文件格式错误：缓冲区不是4096的整数倍： {len(contents)}, {game_buffer_index + buff_start}"
-        )
-
-    count = 0
-    game_index = 0
-    while game_buffer_index < game_buffer_len:
-        book_buffer = game_buffer[game_buffer_index:]
-        try:
-            game = read_from_cbr_buffer(book_buffer)
-            if game is not None:
-                game.info["index"] = game_index
-                lib_info["games"].append(game)
-                game_index += 1
-        except Exception as e:
-            raise CChessException(
-                f"{count}, {game_buffer_index} {len(contents)}, {len(book_buffer)}, {e}"
-            ) from e
-
-        count += 1
-        game_buffer_index += 4096
+    while idx >= 0:
+        game = read_from_cbr_buffer(contents[idx:])
+        if game:
+            lib_info["games"].append(game)
+        idx = contents.find(b"CCBridge Record", idx + 16)
 
     return lib_info
 
 
 def read_from_cbl_progressing(file_name):
     """从 `.cbl` 棋谱库文件逐步读取并 yield 中间结果（用于进度显示）。"""
-    with open(file_name, "rb") as f:
-        contents = f.read()
-
-    magic, _i1, book_count, lib_name = struct.unpack("<16s44si512s", contents[:576])
-
-    if magic != b"CCBridgeLibrary\x00":
-        return
-
-    lib_info = {}
-    lib_info["name"] = cut_bytes_to_str(lib_name)
-    lib_info["games"] = []
-
-    buff_start = 101952
-
-    if book_count <= 128:
-        index = 101952
-    elif book_count <= 256:
-        index = 137280
-    elif book_count <= 384:
-        index = 151080
-    elif book_count <= 512:
-        index = 207936
-    else:
-        index = 349248
-
-    game_buffer = contents[buff_start:]
-    game_buffer_len = len(game_buffer)
-    game_buffer_index = game_buffer.find(b"CCBridge Record")
-    if game_buffer_index < 0:
-        yield lib_info
-    else:
-        if ((game_buffer_len - game_buffer_index) % 4096) != 0:
-            raise CChessException(
-                f"文件格式错误：缓冲区不是4096的整数倍： {len(contents)}, {game_buffer_index + buff_start}"
-            )
-
-        count = 0
-        game_index = 0
-        while index < game_buffer_len:
-            book_buffer = game_buffer[index:]
-            try:
-                game = read_from_cbr_buffer(book_buffer)
-                if game is not None:
-                    game.info["index"] = game_index
-                    lib_info["games"].append(game)
-                    game_index += 1
-                # else:
-                #    print(count, "no game")
-            except Exception as e:
-                raise CChessException(
-                    f"{index}/{count}, {len(contents)}, {len(book_buffer)}, {e}"
-                ) from e
-            count += 1
-            index += 4096
-
-            yield lib_info
+    res = read_from_cbl(file_name)
+    if res:
+        yield res
